@@ -1,0 +1,32 @@
+name: Install Manticore Search on Windows
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  install-manticore:
+    runs-on: windows-latest
+    steps:
+      - name: Download Manticore Search installer
+        run: |
+          Invoke-WebRequest -Uri "https://repo.manticoresearch.com/installer/latest/manticore-x64.exe" -OutFile "manticore-installer.exe"
+
+      - name: Run Manticore Search installer
+        shell: powershell
+        run: |
+          Start-Process -FilePath .\manticore-installer.exe -ArgumentList '/S' -Wait
+
+      - name: Start Manticore Search manually
+        shell: powershell
+        run: |
+          $searchdPath = "C:\Program Files\Manticore Search\bin\searchd.exe"
+          $configPath = "C:\Program Files\Manticore Search\manticore.conf"
+          & $searchdPath --config "$configPath"
+
+      - name: Test Manticore connection
+        shell: powershell
+        run: |
+          mysql -h127.0.0.1 -P9306 -e "SHOW TABLES;"
