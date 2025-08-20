@@ -3,8 +3,7 @@ name: Install Manticore Search on Windows
 on:
   push:
     branches:
-      - main
-  workflow_dispatch:
+      - master
 
 jobs:
   install-manticore:
