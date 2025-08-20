@@ -2,30 +2,66 @@ name: Install Manticore Search on Windows
 
 on:
   push:
-    branches:
-      - master
+    branches: [ master ]
 
 jobs:
   install-manticore:
     runs-on: windows-latest
     steps:
       - name: Download Manticore Search installer
+        shell: powershell
         run: |
           Invoke-WebRequest -Uri "https://repo.manticoresearch.com/repository/manticoresearch_windows/release/x64/manticore-13.6.7-25080704-1ab9ccc95-x64.exe" -OutFile "manticore-installer.exe"
 
-      - name: Run Manticore Search installer
+      # Inno Setup likes /VERYSILENT (not /S). We also add /SUPPRESSMSGBOXES, /NORESTART, /SP-, and a log.
+      # Wait with a timeout so the job never hangs forever.
+      - name: Run Manticore Search installer (silent, with timeout)
         shell: powershell
         run: |
-          Start-Process -FilePath .\manticore-installer.exe -ArgumentList '/S' -Wait
+          $args = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /LOG="install.log"'
+          $p = Start-Process -FilePath .\manticore-installer.exe -ArgumentList $args -PassThru
+          if (-not (Wait-Process -Id $p.Id -Timeout 600 -ErrorAction SilentlyContinue)) {
+            Write-Host "Installer timed out after 10 minutes. Dumping log (if any):"
+            if (Test-Path ".\install.log") { Get-Content .\install.log | Write-Host }
+            throw "Installer did not finish in time."
+          }
+          if (Test-Path ".\install.log") {
+            Write-Host "---- installer log (tail) ----"
+            Get-Content .\install.log -Tail 200 | Write-Host
+          }
 
-      - name: Start Manticore Search manually
+      # If the installer registered a Windows service, prefer that; otherwise start searchd directly
+      - name: Start Manticore (service if present, else binary)
         shell: powershell
         run: |
-          $searchdPath = "C:\Program Files\Manticore Search\bin\searchd.exe"
-          $configPath = "C:\Program Files\Manticore Search\manticore.conf"
-          & $searchdPath --config "$configPath"
+          $service = Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'manticore' -or $_.DisplayName -match 'Manticore' }
+          if ($service) {
+            if ($service.Status -ne 'Running') {
+              Start-Service $service.Name
+              $service.WaitForStatus('Running','00:00:20')
+            }
+          } else {
+            $searchdPath = "C:\Program Files\Manticore Search\bin\searchd.exe"
+            $configPath = "C:\Program Files\Manticore Search\manticore.conf"
+            & "$searchdPath" --config "$configPath"
+          }
 
-      - name: Test Manticore connection
+      # Give it a moment to bind ports
+      - name: Wait for Manticore to be ready
         shell: powershell
         run: |
-          mysql -h127.0.0.1 -P9306 -e "SHOW TABLES;"
+          $deadline = (Get-Date).AddMinutes(2)
+          do {
+            $ok = Test-NetConnection -ComputerName 127.0.0.1 -Port 9308 -WarningAction SilentlyContinue
+            if ($ok.TcpTestSucceeded) { break }
+            Start-Sleep -Seconds 2
+          } while ((Get-Date) -lt $deadline)
+          if (-not $ok.TcpTestSucceeded) { throw "Manticore did not open HTTP port 9308 in time." }
+
+      # Use HTTP /cli to run a quick SQL check (avoids needing the mysql client)
+      - name: Test Manticore connection via HTTP
+        shell: powershell
+        run: |
+          $resp = curl -s http://127.0.0.1:9308/cli -d "SHOW TABLES"
+          Write-Host $resp
+          if (-not $resp) { throw "Empty response from Manticore HTTP API." }
