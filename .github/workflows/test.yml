@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Download Manticore Search installer
         run: |
-          Invoke-WebRequest -Uri "https://repo.manticoresearch.com/installer/latest/manticore-x64.exe" -OutFile "manticore-installer.exe"
+          Invoke-WebRequest -Uri "https://repo.manticoresearch.com/repository/manticoresearch_windows/release/x64/manticore-13.6.7-25080704-1ab9ccc95-x64.exe" -OutFile "manticore-installer.exe"
 
       - name: Run Manticore Search installer
         shell: powershell
